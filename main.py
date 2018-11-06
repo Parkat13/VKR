@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import re
 import os
+import argparse
+import json
 
 
 class ConstLists:
@@ -76,12 +78,12 @@ class DataOfVKR:
         self.all_penalty = 0
         self.all_chars = 0
         self.n_links = 0
-        self.refer = []
         self.list_of_invalid_links = []
         self.links_on_many_sources = []
-        self.write_footnotes = []
+        self.footnotes_write = {}
         self.without_penalty = []
-        self.bytes_of_links = {}
+        self.references_write = {}
+        self.numbers_of_references = {}
         self.file_report1 = open(file1, 'w')
         self.file_report2 = open(file2, 'w')
 
@@ -371,7 +373,8 @@ def save_data_of_authors(
 
 
 def define_author(
-        data, line, number):
+        data, line, number, current_number):
+    data.references_write[current_number]['authors'] = []
     authors_return = []
     regular_string = r'((?:[А-ЯЁA-Z][а-яёa-z]+(?:[\-\–][А-ЯЁA-Z][а-яёa-z]+)*[\s,]*' \
                      r'(?:[А-ЯЁA-Z][а-яёa-z]?\.\s*){1,2})|' \
@@ -404,11 +407,10 @@ def define_author(
             if ch > 3 * len(split_auth[0])/4:
                 trans = [transliteration(split_auth[0]), transliteration(split_auth[1])]
                 authors_return = authors_return + save_data_of_authors(data, trans, number)
-            data.refer = data.refer + [split_auth[0] + ' ' + split_auth[1] + '; ']
+            data.references_write[current_number]['authors'] += [split_auth[0] + ' ' + split_auth[1]]
             authors_return = authors_return + save_data_of_authors(data, split_auth, number)
-        data.refer = data.refer + ['\n']
     else:
-        data.refer = data.refer + ['нет\n']
+        data.references_write[current_number]['authors'] = []
         if number in data.dict_all_data:
             data.dict_all_data[number] += [[set(), set()]]
         else:
@@ -417,7 +419,8 @@ def define_author(
 
 
 def define_date(
-        data, line, number, authors, date):
+        data, line, number, authors, date, current_number):
+    data.references_write[current_number]['year'] = ''
     if re.search(r'(?<!\d)(?:\d{4})(?!\d)', line):
         all_date = re.findall(r'(?<!\d)(?:\d{4})(?!\d)', line)
         for i in all_date:
@@ -427,28 +430,28 @@ def define_date(
                         if date - int(i) >= 10:
                             data.dict_all_data[number][-1] = [data.dict_all_data[number][-1], i]
                             data.list_date = data.list_date + [int(i)]
-                            data.refer = data.refer + [str(i) + '\n\n']
+                            data.references_write[current_number]['year'] = i
                             break
                         else:
                             data.errors_in_date = data.errors_in_date + ['Автор ' + j + ' - классик, неправильный год '
                                                                          + i + '\n\n']
                             data.list_date = data.list_date + [-1]
                             data.dict_all_data[number][-1] = [data.dict_all_data[number][-1], i]
-                            data.refer = data.refer + [str(i) + '\n\n']
+                            data.references_write[current_number]['year'] = i
                             break
                 else:
                     data.dict_all_data[number][-1] = [data.dict_all_data[number][-1], i]
                     data.list_date = data.list_date + [int(i)]
-                    data.refer = data.refer + [str(i) + '\n\n']
+                    data.references_write[current_number]['year'] = i
                 break
         else:
             data.list_date = data.list_date + [-1]
             data.dict_all_data[number][-1] = [data.dict_all_data[number][-1], -1]
-            data.refer = data.refer + ['нет\n\n']
+            data.references_write[current_number]['year'] = ''
     else:
         data.list_date = data.list_date + [-1]
         data.dict_all_data[number][-1] = [data.dict_all_data[number][-1], -1]
-        data.refer = data.refer + ['нет\n\n']
+        data.references_write[current_number]['year'] = ''
 
 
 def is_in_list_bibliography(
@@ -524,7 +527,8 @@ def delete_tag(
 
 
 def define_author_in_footnote(
-        data, line):
+        data, line, number):
+    data.footnotes_write[number]['authors'] = []
     authors_return = []
     regular_string = r'((?:[А-ЯЁA-Z][а-яёa-z]+(?:[\-\–][А-ЯЁA-Z][а-яёa-z]+)*[\s,]*' \
                      r'(?:[А-ЯЁA-Z][а-яёa-z]?\.\s*){1,2})|' \
@@ -547,18 +551,18 @@ def define_author_in_footnote(
                 i = words_correction(i)
             author_split_stemming = stemming_author(author_split(i))
             authors_return += [author_split_stemming[0] + ' ' + author_split_stemming[1]]
-            data.write_footnotes += [author_split(i)[0] + ' ' + author_split(i)[1] + '; ']
+            data.footnotes_write[number]['authors'] += [author_split(i)[0] + ' ' + author_split(i)[1]]
     return authors_return
 
 
 def define_date_in_footnote(
-        data, line, date):
-    data.write_footnotes += ['\nГод: ']
+        data, line, date, number):
+    data.footnotes_write[number]['year'] = ''
     if re.search(r'(?<!\d)(?:\d{4})(?!\d)', line):
         all_date = re.findall(r'(?<!\d)(?:\d{4})(?!\d)', line)
         for i in all_date:
             if (int(i) > 1500) and (int(i) <= date):
-                data.write_footnotes += [i]
+                data.footnotes_write[number]['year'] = i
                 return int(i)
         return -1
     return -1
@@ -569,18 +573,18 @@ def analysis_footnotes(
     text = delete_tag(text)
     all_footnotes = re.findall(r'\[\d{1,3}\]', text)
     split_footnotes = re.split(r'\[\d{1,3}\]', text)[1:]
-    data.write_footnotes += ['\nСноски:\n\n']
     for i in range(len(all_footnotes)):
-        data.write_footnotes += [all_footnotes[i] + split_footnotes[i].rstrip() + '\nАвторы: ']
-        authors = define_author_in_footnote(data, split_footnotes[i])
-        date_of_footnote = define_date_in_footnote(data, split_footnotes[i], date)
-        data.write_footnotes += ['\n\n']
+        data.footnotes_write[all_footnotes[i][1:-1]] = {}
+        data.footnotes_write[all_footnotes[i][1:-1]]['name'] = str(all_footnotes[i]) + split_footnotes[i].rstrip()
+        authors = define_author_in_footnote(data, split_footnotes[i], all_footnotes[i][1:-1])
+        date_of_footnote = define_date_in_footnote(data, split_footnotes[i], date, all_footnotes[i][1:-1])
+        data.footnotes_write[all_footnotes[i][1:-1]]['positions'] = []
         data.data_footnotes[int(all_footnotes[i][1:-1])] = [authors, date_of_footnote]
 
 
 def find_footnote(
         data, text, date):
-    regular_string = r'#Сноска:\[.+\]'
+    regular_string = r'#Сноска:\[\d{1,3}\]'
     if '#Сноска:' in text:
         footnotes_in_text = re.findall(regular_string, text)
         split_text = re.split(regular_string, text)
@@ -675,7 +679,6 @@ def split_all_text_on_parts(
                 break
     if flag_bibliography:
         data.file_report2.write('Нет списка литературы\n\nСумма штрафных баллов: 0')
-        print('nothing!')
         return [1, '', '']
     for p in const_list.names_pril:
         if p.lower() in text.lower():
@@ -688,6 +691,9 @@ def analysis_found_footnotes(
         data, all_text):
     for i in data.found_footnotes:
         ff = 0
+        pos = all_text[0].find('#Сноска:[' + str(i) + ']')
+        pos_of_link = [str(pos) + ' ' + str(pos + len('#Сноска:[' + str(i) + ']'))]
+        data.footnotes_write[str(i)]['positions'] += pos_of_link
         for j in data.data_footnotes[i][0]:
             if (j.split()[0] + ' ' + j.split()[1][0]) in data.set_author_stemming:
                 for d in data.dict_all_data:
@@ -697,9 +703,10 @@ def analysis_found_footnotes(
                                 ff = 1
                                 if (str(d) + '.' + str(sub_d)) in data.not_in_the_text:
                                     data.not_in_the_text.remove(str(d) + '.' + str(sub_d))
-                                pos = all_text[0].find('#Сноска:[' + str(i) + ']')
-                                pos_of_link = [str(pos) + ' ' + str(pos + len('#Сноска:[' + str(i) + ']')) + '; ']
-                                data.bytes_of_links[str(d) + '.' + str(sub_d)] += pos_of_link
+                                if str(d) + '.' + str(sub_d) in data.references_write:
+                                    data.references_write[str(d) + '.' + str(sub_d)]['positions'] += pos_of_link
+                                else:
+                                    data.references_write[str(d)]['positions'] += pos_of_link
                                 break
                     if ff:
                         break
@@ -767,12 +774,23 @@ def create_list_of_sources_from_all_parts(
                 l_l += 1
                 break
             current_line = current_line + text[l_l]
-        data.refer = data.refer + [str(number) + ': ' + current_line.replace('\n', '') + '\nАвторы: ']
-        authors = define_author(data, current_line, number)
+        if str(number) in data.numbers_of_references and data.numbers_of_references[number] > 1:
+            current_number = str(number) + '.' + str(data.numbers_of_references[number])
+            data.numbers_of_references[number] += 1
+        elif str(number) in data.numbers_of_references and data.numbers_of_references[number] == 1:
+            data.references_write[str(number) + '.0'] = data.references_write[str(number)]
+            del data.references_write[str(number)]
+            data.numbers_of_references[number] += 1
+            current_number = str(number) + '.1'
+        else:
+            data.numbers_of_references[number] = 1
+            current_number = str(number)
+        data.references_write[current_number] = {}
+        data.references_write[current_number]['name'] = current_line.replace('\n', '')
+        authors = define_author(data, current_line, number, current_number)
         data.not_in_the_text += [str(number)+'.'+str(len(data.dict_all_data[number])-1)]
-        data.bytes_of_links[str(number)+'.'+str(len(data.dict_all_data[number])-1)] = []
-        data.refer = data.refer + ['Год: ']
-        define_date(data, current_line, number, authors, date)
+        define_date(data, current_line, number, authors, date, current_number)
+        data.references_write[current_number]['positions'] = []
         if re.search(r'http://[\S]+', current_line):
             error_link = re.split(r'http://[\S]+', current_line)
             for k in error_link:
@@ -782,13 +800,7 @@ def create_list_of_sources_from_all_parts(
                 data.error_links = data.error_links + [current_line.replace('\n', '') + '\n\n']
         if not re.search(r'[a-zA-Zа-яА-ЯёЁ]', current_line):
             data.error_links = data.error_links + [current_line.replace('\n', '') + '\n\n']
-    if len(data.dict_all_data) == 0:
-        print('really?!')
     analysis_found_footnotes(data, all_text)
-    for i in data.refer:
-        data.file_report1.write(i)
-    for i in data.write_footnotes:
-        data.file_report1.write(i)
     year5, year10, year20, non = 0, 0, 0, 0
     for i in data.list_date:
         if i >= date - 5:
@@ -826,8 +838,11 @@ def analysis_links(
                             if (str(d) + '.' + str(sub_d)) in data.not_in_the_text:
                                 data.not_in_the_text.remove(str(d) + '.' + str(sub_d))
                             pos = len(all_text[0][:all_text[1]]) + all_text[0][all_text[1]:].find(current_line)
-                            pos_of_link = [str(pos) + ' ' + str(pos + len(current_line)) + '; ']
-                            data.bytes_of_links[str(d) + '.' + str(sub_d)] += pos_of_link
+                            pos_of_link = [str(pos) + ' ' + str(pos + len(current_line))]
+                            if str(d) + '.' + str(sub_d) in data.references_write:
+                                data.references_write[str(d) + '.' + str(sub_d)]['positions'] += pos_of_link
+                            else:
+                                data.references_write[str(d)]['positions'] += pos_of_link
                             all_text[1] = pos + 1
                             break
         if ff:
@@ -1026,7 +1041,10 @@ def analysis_text(
                         data.not_in_the_text.remove(str(j) + '.' + str(c))
                     pos = len(all_text[0][:all_text[1]]) + all_text[0][all_text[1]:].find(links[i])
                     pos_of_link = [str(pos) + ' ' + str(pos + len(links[i])) + '; ']
-                    data.bytes_of_links[str(j) + '.' + str(c)] += pos_of_link
+                    if str(j) + '.' + str(c) in data.references_write:
+                        data.references_write[str(j) + '.' + str(c)]['positions'] += pos_of_link
+                    else:
+                        data.references_write[str(j)]['positions'] += pos_of_link
                     all_text[1] = pos + 1
                 if len(data.dict_all_data[j]) > 1:
                     if not ('[' + str(j) + ']; ' in data.links_on_many_sources):
@@ -1060,12 +1078,9 @@ def analysis_references(
         return
     create_list_of_sources_from_all_parts(data, line[2], date, [text, 0])
     analysis_text(data, line[1], [text, 0])
-    data.file_report1.write('\n\nПозиции ссылок в тексте на источники:\n\n')
-    for i in data.bytes_of_links:
-        data.file_report1.write(i + ':\n')
-        for j in data.bytes_of_links[i]:
-            data.file_report1.write(j)
-        data.file_report1.write('\n\n')
+    data.file_report1.write(json.dumps(data.references_write, ensure_ascii=False, indent=4))
+    data.file_report1.write('\n\nСноски:\n\n')
+    data.file_report1.write(json.dumps(data.footnotes_write, ensure_ascii=False, indent=4))
     data.print_report_1(date)
     data.print_report_23()
     data.print_report_45678()
@@ -1086,6 +1101,8 @@ def file_rewrite(text):
 
 def main_analysis_references(
         direct, date):
+    if direct[-1] != '/':
+        direct += '/'
     list_of_files = sorted(os.listdir(path=direct))
     n = 0
     while True:
@@ -1109,15 +1126,18 @@ def main_analysis_references(
                 if split_name[1][0].isdigit():
                     analysis_list = analysis_list + [direct + list_of_files[n] + '/' + list_of_new_files[nn]]
                 nn += 1
-            print(m)
-            data_of_vkr = DataOfVKR(direct + list_of_files[n] + '/' + m + '_bibl_list.txt',
+            data_of_vkr = DataOfVKR(direct + list_of_files[n] + '/' + m + '_bibl_list.json',
                                     direct + list_of_files[n] + '/' + m + '_bibl_remarks.txt')
             analysis_references(data_of_vkr, analysis_list, date)
             data_of_vkr.files_close()
         n += 1
 
 
-endings = file_rewrite('endings.txt')
-const_list = ConstLists()
-main_analysis_references('anketa_docs_60_out_reorg/', 2017)
-main_analysis_references('60_МГПУ_МГППУ_out_reorg/', 2017)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("direct")
+    parser.add_argument("date", type=int)
+    args = parser.parse_args()
+    endings = file_rewrite('endings.txt')
+    const_list = ConstLists()
+    main_analysis_references(args.direct, args.date)
